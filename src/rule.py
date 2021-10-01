@@ -24,6 +24,7 @@ Grouping rules.  Definitions and functions for fixing groups.
 
 import logging
 import random
+import numpy as np
 import re
 from collections import Counter
 from operator import itemgetter
@@ -192,6 +193,57 @@ class Rule(object):
     def __str__(self):
         return "<{0} {1} {2}>".format(self.name, self.attribute, self.values)
 
+class Align(Rule):
+    name = 'Align'
+    def _init(self, attribute, course, values = 'all', weight = None,
+              min = None, **kwargs):
+        if not min:
+            # default to 5
+            min = 5
+        self.min = min
+        self.num_blocks = int(np.array([len([block=='True' for block in student['Available Blocks'][1:-1].split(', ')]) for student in course.students_no_phantoms]).mean())
+
+    def _get_student_blocks_array(self, student):
+        if student[student.identifier] == 'phantom':
+            return np.array([True]*self.num_blocks)
+        else:
+            # print(student['Available Blocks'])
+            blocks = np.array([block=='True' for block in student['Available Blocks'][1:-1].split(', ')])
+            # print(blocks)
+            return blocks
+
+    def calc_overlap(self, students):
+        # import pdb; pdb.set_trace()
+        # [avail=='True' for avail in students[0]['Available Blocks'][1:-1].split(', ')]
+        # overlap = np.array([np.array([bool(time) for time in student['Available Blocks'].split(', ')]) for student in students])#.all(axis=0).sum()
+        try:
+            overlap = np.array([self._get_student_blocks_array(student) for student in students]).all(axis=0).sum()
+        except:
+            import pdb; pdb.set_trace()
+        return overlap
+
+    def _check(self, students):
+        overlap = self.calc_overlap(students)
+        # print(f'checking align for {len(students)} students: {overlap}')
+        return overlap >= self.min
+        # return self.calc_overlap(students) >= self.min
+
+    def _fix(self, student, groups, students):
+        ''' FIXME(epatten-uw): For each group, calculate which student is the 
+        limiting factor by calculating the overlap of the other students.
+        The group of n-1 students that has the highest overlap leaves the other
+        as the limiting factor. Starting with other groups that aren't happy,
+        try to swap the limiting students in each to see if it improves.
+        Otherwise try with happy groups that would still have a valid rule.
+        But may want to try going through the sheet first and verifying what
+        other groups we can manually set first, then seeing if the random mixing
+        couldn't then work.
+        '''
+        mixing = 30
+        # import pdb; pdb.set_trace()
+        for i in range(int(mixing)):
+                find_target_and_swap(random.choice(students), groups)
+        return True
 
 class Cluster(Rule):
     name = 'Cluster'
@@ -526,7 +578,7 @@ class RuleNotImplemented(Exception):
 your input deck?".format(self.rule)
 
 _all_rules = {}
-for rule in [Aggregate, Distribute, Cluster, Balance]:
+for rule in [Aggregate, Distribute, Cluster, Balance, Align]:
     _all_rules[rule.name.lower()] = rule
 
 def make_rule(input_spec, course):
