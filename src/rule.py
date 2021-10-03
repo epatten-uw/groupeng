@@ -201,14 +201,17 @@ class Align(Rule):
             # default to 5
             min = 5
         self.min = min
-        self.num_blocks = int(np.array([len([block=='True' for block in student['Available Blocks'][1:-1].split(', ')]) for student in course.students_no_phantoms]).mean())
+        self.num_blocks = int(np.array([len(self._get_student_blocks_array(student)) for student in course.students_no_phantoms]).mean())
 
     def _get_student_blocks_array(self, student):
         if student[student.identifier] == 'phantom':
             return np.array([True]*self.num_blocks)
         else:
             # print(student['Available Blocks'])
-            blocks = np.array([block=='True' for block in student['Available Blocks'][1:-1].split(', ')])
+            if ('A' in student['Available Blocks']) or ('U' in student['Available Blocks']): # if availability is expressed in series of A's and U's (available and unavailable)
+                blocks = np.array([block=='A' for block in student['Available Blocks']])
+            elif ('True' in student['Available Blocks']) or ('False' in student['Available Blocks']): # if availability is expressed as string of True False lists
+                blocks = np.array([block=='True' for block in student['Available Blocks'][1:-1].split(', ')])
             # print(blocks)
             return blocks
 
@@ -225,8 +228,33 @@ class Align(Rule):
     def _check(self, students):
         overlap = self.calc_overlap(students)
         # print(f'checking align for {len(students)} students: {overlap}')
-        return overlap >= self.min
         # return self.calc_overlap(students) >= self.min
+        if overlap >= self.min:
+            return True
+        # if one student in the team just has low availability, set an easier threshold
+        num_A = np.array([self._get_student_blocks_array(student) for student in students]).sum(axis=1)
+        idx = np.argmin(num_A)
+        # import pdb; pdb.set_trace()
+        # FIXME(epattenuw): Not sure why it fails here, unless there is a debug statement...
+        lowest_availability = np.min(num_A) 
+        if overlap >= 0.5*lowest_availability:
+            # verify than the others still meet the minimum
+            others = students.copy()
+            others.pop(idx)
+            return self.calc_overlap(others) >= self.min
+        else:
+            return False
+        # if a student in the team just has low availability, set an easier threshold
+        # return overlap >= min(self.min, 0.5*self._lowest_availability(students))
+
+    def permissable_change(self, old, new):
+        b = (self.calc_overlap(new) > self.calc_overlap(old))
+        if self.check(new) and not b:
+            # return 2 here so that caller can distinquish if they
+            # care that we have "worsened" but are still above the min
+            return 2
+        else:
+            return b
 
     def _fix(self, student, groups, students):
         ''' FIXME(epatten-uw): For each group, calculate which student is the 
@@ -239,11 +267,21 @@ class Align(Rule):
         other groups we can manually set first, then seeing if the random mixing
         couldn't then work.
         '''
-        mixing = 30
         # import pdb; pdb.set_trace()
-        for i in range(int(mixing)):
-                find_target_and_swap(random.choice(students), groups)
-        return True
+        # mixing = 30
+        # for i in range(int(mixing)):
+        #         find_target_and_swap(random.choice(students), groups)
+        # return True
+
+        targets = [g for g in groups if not self.check(g)]
+
+        try:
+            if find_target_and_swap(student, targets):
+                return True
+            elif find_target_and_swap(student, groups):
+                return True
+        except SwapButNotFix:
+            return False
 
 class Cluster(Rule):
     name = 'Cluster'
