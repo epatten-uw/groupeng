@@ -225,30 +225,35 @@ class Align(Rule):
             import pdb; pdb.set_trace()
         return overlap
 
-    def _check(self, students):
-        overlap = self.calc_overlap(students)
-        # print(f'checking align for {len(students)} students: {overlap}')
-        # return self.calc_overlap(students) >= self.min
-        if overlap >= self.min:
-            return True
-        # if one student in the team just has low availability, set an easier threshold
+    def get_availability_min_idx(self, students):
         num_A = np.array([self._get_student_blocks_array(student) for student in students]).sum(axis=1)
-        idx = np.argmin(num_A)
-        # import pdb; pdb.set_trace()
-        # FIXME(epattenuw): Not sure why it fails here, unless there is a debug statement...
-        lowest_availability = np.min(num_A) 
-        if overlap >= 0.5*lowest_availability:
-            # verify than the others still meet the minimum
-            others = students.copy()
-            others.pop(idx)
-            return self.calc_overlap(others) >= self.min
+        return np.min(num_A), np.argmin(num_A)
+
+    def calc_overlap_score(self, students):
+        # FIXME(epatten-uw): Doesn't seem to have enough resolution to show progress initially so that partially improving trades can be made
+        overlap = self.calc_overlap(students)
+        lowest_availability, idx = self.get_availability_min_idx(students)
+        # use raw overlap if it satisfies the min or should be able to
+        # for student in students:
+        #     print(student['Available Blocks'])
+        #     # print(self._get_student_blocks_array(student))
+        # print(f'overlap: {overlap}; lowest: {lowest_availability}')
+        if (overlap >= self.min) or (overlap < 0.5*lowest_availability):
+            return overlap
         else:
-            return False
-        # if a student in the team just has low availability, set an easier threshold
-        # return overlap >= min(self.min, 0.5*self._lowest_availability(students))
+            # if one student in the team just has low availability, set an easier threshold
+            # and use overlap of others
+            others = [student for i, student in enumerate(students) if i != idx]
+            # temp = self.calc_overlap(others)
+            # print(temp)
+            # return temp
+            return self.calc_overlap(others)
+        
+    def _check(self, students):
+        return self.calc_overlap_score(students) >= self.min
 
     def permissable_change(self, old, new):
-        b = (self.calc_overlap(new) > self.calc_overlap(old))
+        b = (self.calc_overlap_score(new) > self.calc_overlap_score(old))
         if self.check(new) and not b:
             # return 2 here so that caller can distinquish if they
             # care that we have "worsened" but are still above the min
@@ -273,12 +278,14 @@ class Align(Rule):
         #         find_target_and_swap(random.choice(students), groups)
         # return True
 
-        targets = [g for g in groups if not self.check(g)]
+        target_groups = [g for g in groups if not self.check(g)]
+        other_groups = [g for g in groups if g not in target_groups]
+        # import pdb; pdb.set_trace()
 
         try:
-            if find_target_and_swap(student, targets):
+            if find_target_and_swap(student, target_groups):
                 return True
-            elif find_target_and_swap(student, groups):
+            elif find_target_and_swap(student, other_groups):
                 return True
         except SwapButNotFix:
             return False
